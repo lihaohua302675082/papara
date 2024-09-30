@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Page</title>
+</head>
+<body>
+    <h1>Welcome, {{ username }}</h1>
+
+    <h2>Enter Device ID</h2>
+    <form id="deviceForm">
+        <label for="device_id">Device ID:</label>
+        <input type="text" id="device_id" name="device_id" required>
+        <button type="submit">Submit Device ID</button>
+    </form>
+
+    <button id="processNowButton">Process Now</button>
+
+    <script>
+        const user = "{{ username }}"; // 获取模板传递的用户名
+
+        // 提交device_id
+        document.getElementById('deviceForm').addEventListener('submit', async function (e) {
+            e.preventDefault();
+            const device_id = document.getElementById('device_id').value;
+
+            const response = await fetch(`/${user}/receive_device`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ device_id: device_id })
+            });
+
+            const result = await response.json();
+            alert(result.status);
+        });
+
+        // 立即处理按钮
+        document.getElementById('processNowButton').addEventListener('click', async function () {
+            const response = await fetch(`/${user}/process_now`, { method: 'GET' });
+            const result = await response.json();
+            alert(result.status);
+        });
+    </script>
+</body>
+</html>
