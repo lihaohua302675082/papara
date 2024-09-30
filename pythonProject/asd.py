@@ -39,6 +39,23 @@ async def add_acsTransID(acsTransID, user):
             return True
         except aiosqlite.IntegrityError:
             return False
+async def delete_device_by_id(user, index):
+    async with aiosqlite.connect('acstransid.db') as conn:
+        # 获取该用户的设备列表
+        async with conn.execute('SELECT id FROM device WHERE user = ?', (user,)) as cursor:
+            device_ids = await cursor.fetchall()
+
+        if index < 1 or index > len(device_ids):
+            return "Invalid index. Please provide a valid number."
+
+        # 获取要删除的设备 ID
+        device_id_to_delete = device_ids[index - 1][0]
+
+        # 删除设备 ID
+        await conn.execute('DELETE FROM device WHERE id = ?', (device_id_to_delete,))
+        await conn.commit()
+        return f"Device ID at position {index} deleted successfully."
+
 
 async def add_device_id(device_id, user):
     async with aiosqlite.connect('acstransid.db') as conn:
@@ -130,32 +147,64 @@ async def send_post_request(acsTransID, device_id, user):
                 ssl=False
             ) as response:
                 if response.status == 200:
-                    print(f"成功发送POST请求，AcsTransID: {acsTransID}，Device ID: {device_id}，User: {user}")
+                    message = f"成功发送POST请求，AcsTransID: {acsTransID}，Device ID: {device_id}，User: {user}"
+                    print(message)
+                    return {"status": "success", "message": message}
                 else:
-                    print(f"发送POST请求时出错: {response.status}, 内容: {await response.text()}")
+                    # 如果不是 200 状态码，返回空消息
+                    return {"status": "error", "message": None}
     except Exception as e:
+        # 如果发生异常，返回空消息
         print(f"发送POST请求时出错: {e}")
-
+        return {"status": "error", "message": None}
 async def process_unprocessed_acsTransIDs(user, force=False):
     device_ids = await get_device_ids(user)
+    messages = []  # 用来存储每次请求的结果（包括成功、失败和无可用设备ID的消息）
     if not device_ids:
-        print(f"没有可用的设备ID for user {user}")
-        return
+        no_device_message = f"没有可用的设备ID for user {user}"
+        print(no_device_message)
+        messages.append(no_device_message)  # 返回无可用设备ID的消息
+        return messages
     async with aiosqlite.connect('acstransid.db') as conn:
         cursor = await conn.execute('SELECT acsTransID FROM ids WHERE used = 0 AND user = ?', (user,))
         acsTransIDs = await cursor.fetchall()
         threshold = ACS_TRANSID_THRESHOLD.get(user, 1)
+
         if force or len(acsTransIDs) >= threshold:
             tasks = []
             for acsTransID_tuple in acsTransIDs:
                 acsTransID = acsTransID_tuple[0]
                 for device_id in device_ids:
-                    tasks.append(asyncio.create_task(send_post_request(acsTransID, device_id, user)))
+                    result = await send_post_request(acsTransID, device_id, user)
+                    messages.append(result["message"])  # 保存所有的消息（成功或失败）
                 await mark_acsTransID_as_used(acsTransID, user)
             if tasks:
                 await asyncio.gather(*tasks)
-        else:
-            print(f"用户 {user} 的 acsTransID 数量未达到阈值，当前数量：{len(acsTransIDs)}，阈值：{threshold}")
+
+    return messages  # 返回所有请求的消息
+
+@app.route('/<user>/get_device_ids', methods=['GET'])
+async def get_device_ids_route(user):
+    device_ids = await get_device_ids(user)
+    return jsonify({"device_ids": device_ids}), 200
+
+@app.route('/<user>/get_status', methods=['GET'])
+async def get_status(user):
+    async with aiosqlite.connect('acstransid.db') as conn:
+        # 获取用户的所有 device_id
+        cursor = await conn.execute('SELECT device_id FROM device WHERE user = ?', (user,))
+        device_rows = await cursor.fetchall()
+        device_ids = [row[0] for row in device_rows] if device_rows else ['Not available']
+
+        # 获取用户的所有未使用的 acsTransID
+        cursor = await conn.execute('SELECT acsTransID FROM ids WHERE user = ? AND used = 0', (user,))
+        acs_trans_rows = await cursor.fetchall()
+        acs_trans_ids = [row[0] for row in acs_trans_rows] if acs_trans_rows else ['Not available']
+
+    return jsonify({
+        "device_ids": device_ids,
+        "acs_trans_ids": acs_trans_ids
+    })
 
 @app.route('/<user>/receive', methods=['POST'])
 @app.route('/<user>/receive/<string:acsTransID>', methods=['GET'])
@@ -203,6 +252,11 @@ async def process_now(user):
     await process_unprocessed_acsTransIDs(user, force=True)
     return jsonify({"status": f"已立即处理用户 {user} 的未处理 acsTransID"}), 200
 
+@app.route('/<user>/delete_device_by_id/<int:index>', methods=['DELETE'])
+async def delete_device_id(user, index):
+    result = await delete_device_by_id(user, index)
+    return jsonify({'status': result})
+
 @app.before_serving
 async def startup():
     await init_db()
@@ -213,13 +267,28 @@ async def index():
     return await render_template('index.html')
 
 # 跳转并显示 user_page.html 页面，处理查询参数
-@app.route('/user_page')
+@app.route('/user_page', methods=['GET'])
 async def user_page():
     username = request.args.get('username')
+
     if not username:
         return redirect(url_for('index'))
-    return await render_template('user_page.html', username=username)
+
+    # 查询数据库，获取用户的所有 device_id 和 acsTransID
+    async with aiosqlite.connect('acstransid.db') as conn:
+        # 获取用户的所有 device_id
+        cursor = await conn.execute('SELECT device_id FROM device WHERE user = ?', (username,))
+        device_rows = await cursor.fetchall()
+        device_ids = [row[0] for row in device_rows] if device_rows else ['Not available']
+
+        # 获取用户的所有未使用的 acsTransID
+        cursor = await conn.execute('SELECT acsTransID FROM ids WHERE user = ? AND used = 0', (username,))
+        acs_trans_rows = await cursor.fetchall()
+        acs_trans_ids = [row[0] for row in acs_trans_rows] if acs_trans_rows else ['Not available']
+
+    # 渲染 user_page.html 并传递用户的所有 device_id 和 acsTransID
+    return await render_template('user_page.html', username=username, device_ids=device_ids, acsTransIDs=acs_trans_ids)
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='127.0.0.1', port=5000)
 

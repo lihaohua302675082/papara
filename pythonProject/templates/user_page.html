@@ -4,9 +4,77 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>User Page</title>
+    <style>
+            body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 20px;
+        }
+
+        h1 {
+            color: #333;
+        }
+
+        h2 {
+            color: #555;
+            border-bottom: 2px solid #ccc;
+            padding-bottom: 10px;
+        }
+
+        ul {
+            list-style-type: none;
+            padding: 0;
+        }
+
+        li {
+            background: #fff;
+            margin: 5px 0;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+
+        form {
+            margin: 20px 0;
+        }
+
+        input[type="text"] {
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            width: 200px;
+            margin-right: 10px;
+        }
+
+        button {
+            padding: 10px 15px;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #218838;
+        }
+    </style>
 </head>
 <body>
     <h1>Welcome, {{ username }}</h1>
+    <h2>User Information</h2>
+
+    <!-- 实时更新的 AcsTransIDs -->
+    <h2>AcsTransIDs:</h2>
+    <ul id="acsTransList">
+        <!-- AcsTransID 将在这里实时更新 -->
+    </ul>
+
+    <h2>Device IDs:</h2>
+    <ul id="deviceList">
+        <!-- 设备 ID 将在这里更新 -->
+    </ul>
 
     <h2>Enter Device ID</h2>
     <form id="deviceForm">
@@ -15,12 +83,102 @@
         <button type="submit">Submit Device ID</button>
     </form>
 
+    <h2>Delete Device ID</h2>
+    <form id="deleteDeviceForm">
+        <label for="device_index">Enter Device Index to Delete:</label>
+        <input type="number" id="device_index" name="device_index" min="1" required>
+        <button type="submit">Delete Device ID</button>
+    </form>
+    <h2>Receive AcsTransID</h2>
+    <form id="acsTransIDForm">
+        <label for="acsTransID">Enter AcsTransID:</label>
+        <input type="text" id="acsTransID" name="acsTransID" required>
+        <label>
+            <input type="checkbox" id="force" name="force"> Force Processing
+        </label>
+        <button type="submit">Submit AcsTransID</button>
+    </form>
+    <h2>Set Threshold</h2>
+    <form id="setThresholdForm">
+        <label for="threshold">Enter New Threshold:</label>
+        <input type="number" id="threshold" name="threshold" min="1" required>
+        <button type="submit">Set Threshold</button>
+    </form>
     <button id="processNowButton">Process Now</button>
 
     <script>
         const user = "{{ username }}"; // 获取模板传递的用户名
+                // 获取设备 ID
+        async function fetchDeviceIDs() {
+            const response = await fetch(`/${user}/get_device_ids`);
+            const data = await response.json();
 
-        // 提交device_id
+            // 更新 device_id 列表
+            const deviceList = document.getElementById('deviceList');
+            deviceList.innerHTML = '';  // 清空列表
+            data.device_ids.forEach(device_id => {
+                const li = document.createElement('li');
+                li.textContent = device_id;
+                deviceList.appendChild(li);
+            });
+        }
+
+        // 实时更新 AcsTransIDs
+        async function fetchStatus() {
+            const response = await fetch(`/${user}/get_status`);
+            const data = await response.json();
+
+            // 更新 AcsTransID 列表
+            const acsTransList = document.getElementById('acsTransList');
+            acsTransList.innerHTML = '';  // 清空列表
+            data.acs_trans_ids.forEach(acsTransID => {
+                const li = document.createElement('li');
+                li.textContent = acsTransID;
+                acsTransList.appendChild(li);
+            });
+        }
+        // 提交 AcsTransID
+        document.getElementById('acsTransIDForm').addEventListener('submit', async function (e) {
+            e.preventDefault();
+            const acsTransID = document.getElementById('acsTransID').value;
+            const force = document.getElementById('force').checked; // 获取复选框状态
+
+            const response = await fetch(`/${user}/receive`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ acsTransID: acsTransID, force: force }) // 发送 force
+            });
+
+            const result = await response.json();
+            alert(result.status);
+        })
+        // 提交设置阈值
+        document.getElementById('setThresholdForm').addEventListener('submit', async function (e) {
+            e.preventDefault();
+            const threshold = document.getElementById('threshold').value;
+
+            const response = await fetch(`/${user}/set_threshold/${threshold}`, {
+                method: 'GET'
+            });
+
+            const result = await response.json();
+            alert(result.status);
+        });
+        document.getElementById('deleteDeviceForm').addEventListener('submit', async function (e) {
+            e.preventDefault();
+            const index = document.getElementById('device_index').value;
+
+            const response = await fetch(`/${user}/delete_device_by_id/${index}`, {
+                method: 'DELETE'
+            });
+
+            const result = await response.json();
+            alert(result.status);
+            fetchDeviceIDs(); // 删除后刷新设备 ID 列表
+        });
+        // 提交 device_id
         document.getElementById('deviceForm').addEventListener('submit', async function (e) {
             e.preventDefault();
             const device_id = document.getElementById('device_id').value;
@@ -35,6 +193,9 @@
 
             const result = await response.json();
             alert(result.status);
+
+            // 提交成功后更新设备 ID 列表
+            fetchDeviceIDs();
         });
 
         // 立即处理按钮
@@ -43,6 +204,19 @@
             const result = await response.json();
             alert(result.status);
         });
+
+
+
+        // 每隔 5 秒请求一次服务器，实时更新 AcsTransIDs
+        setInterval(fetchStatus, 5000);
+
+        // 页面加载时立即获取设备 ID
+        // 页面加载时同时获取设备 ID 和 AcsTransIDs
+        window.onload = async function() {
+            await fetchDeviceIDs();
+            await fetchStatus();
+        };
+
     </script>
 </body>
 </html>
