@@ -71,6 +71,11 @@
         <!-- AcsTransID 将在这里实时更新 -->
     </ul>
 
+    <h2>All-AcsTransIDs:</h2>
+    <ul id="allAcsTransIDs">
+        <!-- All-AcsTransID 将在这里实时更新 -->
+    </ul>
+
     <h2>Device IDs:</h2>
     <ul id="deviceList">
         <!-- 设备 ID 将在这里更新 -->
@@ -103,6 +108,13 @@
         <label for="threshold">Enter New Threshold:</label>
         <input type="number" id="threshold" name="threshold" min="1" required>
         <button type="submit">Set Threshold</button>
+    </form>
+
+    <h2>Mark AcsTransID as Unused</h2>
+    <form id="markAsUnusedForm">
+        <label for="acsTransID">Enter AcsTransID to Mark as Unused:</label>
+        <input type="text" id="usedacsTransID" name="usedacsTransID" required>
+        <button type="submit">Mark as Unused</button>
     </form>
     <button id="processNowButton">Process Now</button>
 
@@ -137,6 +149,23 @@
                 acsTransList.appendChild(li);
             });
         }
+
+
+        async function fetchAcsTransIDs() {
+            const response = await fetch(`/${user}/get_all_acs_trans_ids`);
+            const data = await response.json();
+
+            // 显示所有的 AcsTransIDs
+            const allList = document.getElementById('allAcsTransIDs');
+            allList.innerHTML = '';  // 清空当前列表
+            data.acs_trans_ids.forEach((acsTransID) => {
+                const li = document.createElement('li');
+                li.textContent = acsTransID;
+                allList.appendChild(li);
+            });
+        }
+
+
         // 提交 AcsTransID
         document.getElementById('acsTransIDForm').addEventListener('submit', async function (e) {
             e.preventDefault();
@@ -205,7 +234,24 @@
             alert(result.status);
         });
 
+        // 提交标记为未使用的 AcsTransID
+        document.getElementById('markAsUnusedForm').addEventListener('submit', async function (e) {
+            e.preventDefault();
+            const acsTransID = document.getElementById('usedacsTransID').value;
 
+            const response = await fetch(`/${user}/mark_acs_transid_unused`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ acsTransID: acsTransID })
+            });
+
+            const result = await response.json();
+            alert(result.status);
+            fetchStatus(); // 更新列表
+            fetchAcsTransIDs()
+        });
 
         // 每隔 5 秒请求一次服务器，实时更新 AcsTransIDs
         setInterval(fetchStatus, 5000);
@@ -215,6 +261,7 @@
         window.onload = async function() {
             await fetchDeviceIDs();
             await fetchStatus();
+            await fetchAcsTransIDs()
         };
 
     </script>

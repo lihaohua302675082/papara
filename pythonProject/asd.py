@@ -219,6 +219,7 @@ async def receive(user, acsTransID=None):
     if acsTransID:
         if await add_acsTransID(acsTransID, user):
             # 检查是否立即处理
+            print(force)
             await process_unprocessed_acsTransIDs(user, force=force)
             return jsonify({"status": f"收到 acsTransID for user {user}"}), 200
         else:
@@ -288,7 +289,40 @@ async def user_page():
 
     # 渲染 user_page.html 并传递用户的所有 device_id 和 acsTransID
     return await render_template('user_page.html', username=username, device_ids=device_ids, acsTransIDs=acs_trans_ids)
+async def get_all_acs_trans_ids_from_db(user):
+    acs_trans_ids = []
+    async with aiosqlite.connect('acstransid.db') as conn:
+        async with conn.execute('SELECT acsTransID FROM ids WHERE user = ? ',(user,)) as cursor:
+            async for row in cursor:
+                acs_trans_ids.append(row[0])
+                if(len(acs_trans_ids) == 10):
+                    break
+    return acs_trans_ids
 
+@app.route('/<user>/get_all_acs_trans_ids', methods=['GET'])
+async def get_all_acs_trans_ids(user):
+    acs_trans_ids = await get_all_acs_trans_ids_from_db(user)
+    return jsonify({"acs_trans_ids": acs_trans_ids})
+
+# 标记指定的 AcsTransID 为未使用 (used = 0)
+async def mark_acs_transid_as_unused(acsTransID, user):
+    async with aiosqlite.connect('acstransid.db') as conn:
+        # 更新该用户的指定 AcsTransID 为未使用
+        await conn.execute('UPDATE ids SET used = 0 WHERE acsTransID = ? AND user = ?', (acsTransID, user))
+        await conn.commit()
+    return f"AcsTransID {acsTransID} for user {user} marked as unused."
+
+# 新的路由来标记指定 AcsTransID 为未使用
+@app.route('/<user>/mark_acs_transid_unused', methods=['POST'])
+async def mark_acs_transid_unused(user):
+    data = await request.get_json()
+    acsTransID = data.get('acsTransID')
+
+    if not acsTransID:
+        return jsonify({"error": "AcsTransID not provided"}), 400
+
+    result = await mark_acs_transid_as_unused(acsTransID, user)
+    return jsonify({"status": result}), 200
 if __name__ == '__main__':
     app.run(host='127.0.0.1', port=5000)
 
